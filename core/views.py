@@ -109,19 +109,28 @@ def verifyOTPAuthAPI(transactionNo, otp):
 #     return JsonResponse({}, status=400)
 
 @api_view(['POST'])
-# @check_token
-# @login_required
+@check_token
 @request_interface(['receiverSC', 'message'])
 def sendRequest(request):
     if request.method == 'POST':
-        if AnonProfile.objects.filter(shareableCode=request.data['receiverSC']).exists():
-            profile = AnonProfile.objects.get(shareableCode=request.data['receiverSC'])
-            sendPushNotification(profile.deviceID, "New Request", request.data['message'])
-            return JsonResponse({'body': 'message sent'}, status=200)
+        try:
+            lender = AnonProfile.objects.get(shareableCode=request.data['receiverSC'])
+            requester = AnonProfile.objects.filter(uidToken=request.data['uidToken']).exists()
+            Transaction.objects.filter(lender=lender, requester=requester).update(status='aborted')
+            Transaction.objects.add(lender=lender, requester=requester)
+            if sendPushNotification(lender.deviceID, "New Address Request", request.data['message']):
+                return JsonResponse({'body': 'message sent'}, status=200)
+            else:
+                return JsonResponse({'body': 'Unable to send message'}, status=400)
+        except:
+            return JsonResponse({}, status=400)
+
     return JsonResponse({}, status=400)
 
+
+
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
-    pass
+    return
     result = push_notification_service.notify_single_device(registration_id=deviceID, message_title=messageTitle, message_body=messageBody, data_message=dataMessage)
     if result['success'] == 1:
         return True
