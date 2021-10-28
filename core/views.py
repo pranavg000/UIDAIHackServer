@@ -177,9 +177,7 @@ def POSTekyc(request):
             passcode_enc = request.data['passcode']
             filename = request.data['filename']
 
-            print(transactionId, eKYC_enc, passcode_enc, filename)
             renterDeviceId = Transaction.objects.get(id=transactionId).requester.deviceID
-            print(transactionId, eKYC_enc, passcode_enc, filename, renterDeviceId)
 
             OfflineEKYC.objects.create(
                 transactionId=transactionId,
@@ -191,17 +189,20 @@ def POSTekyc(request):
 
             message_caption = "Address Request Approved!"
             message_body = "Hi There! Landlord has approved your request to share his address, please click the button to get the address"
-            
-            if sendPushNotification(renterDeviceId, message_caption, message_body):
-                return JsonResponse({'body': {
+            message_data = {
+                'transactionId': transactionId,
+                'status': "200"
+            }
+            if sendPushNotification(renterDeviceId, message_caption, message_body, message_data):
+                return JsonResponse({
                     'message':'Hello from the server!', 
                     'txnID': transactionId
-                    }}, status=200)
-            return JsonResponse({'body': 'Push Notification Failure'}, status=500)
+                    }, status=200)
+            return JsonResponse({'message': 'Push Notification Failure', 'txnID': '-1'}, status=500)
         except:
-            return JsonResponse({'body': 'POST request failed, please request again'}, status=500)
+            return JsonResponse({'message': 'POST request failed, please request again', 'txnID': '-1'}, status=500)
 
-    return JsonResponse({'body': 'Please "POST" the request'}, status=400)
+    return JsonResponse({'message': 'Please "POST" the request', 'txnID': '-1'}, status=400)
 
 
 @api_view(['GET'])
@@ -212,14 +213,18 @@ def GETekyc(request):
         try:
             transactionId = request.data['txnID']
             offlineEKYC = OfflineEKYC.objects.get(transactionId=transactionId)
+            
+            transaction = Transaction.objects.get(id=transactionId)
+            transaction.status = 'shared'
+            transaction.save()
+            
             return JsonResponse({
-                'body': {
-                    'encryptedEKYC': offlineEKYC.encryptedEKYC,
-                    'encryptedPasscode': offlineEKYC.encryptedPasscode,
-                    'filename': offlineEKYC.filename,
-                    'txnID': offlineEKYC.transactionId
-                }}, status=200)
+                'encryptedEKYC': offlineEKYC.encryptedEKYC,
+                'encryptedPasscode': offlineEKYC.encryptedPasscode,
+                'filename': offlineEKYC.filename,
+                'txnID': offlineEKYC.transactionId
+                }, status=200)
         except:
-            return JsonResponse({'body': 'GET request failed, please request again'}, status=500)
+            return JsonResponse({'message': 'GET request failed, please request again', 'txnID': '-1'}, status=500)
 
-    return JsonResponse({'body': 'Please "GET" the request!'}, status=400)
+    return JsonResponse({'message': 'Please "GET" the request!', 'txnID': '-1'}, status=400)
