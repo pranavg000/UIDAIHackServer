@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from .models import *
 from .decorators import check_token, request_interface
 from django.conf import settings
+from django.core.files.storage import default_storage
 
 from pyfcm import FCMNotification
 from .utils import getRandAlNum, getRandAl
@@ -75,7 +76,6 @@ def authUID(request):
     return JsonResponse({}, status=400)
 
 
-
 @api_view(['POST'])
 @request_interface(['transactionNo', 'otp', 'deviceID', 'publicKey'])
 def authOTP(request):
@@ -130,6 +130,7 @@ def sendRequest(request):
 
     return JsonResponse({}, status=400)
 
+
 @api_view(['POST'])
 @check_token
 @request_interface(['transactionNo'])
@@ -165,7 +166,65 @@ def getPublicKey(request):
     return JsonResponse({}, status=400)
 
 
+@api_view(['POST'])
+@check_token
+@request_interface(['txnID', 'eKYC', 'passcode', 'filename'])
+def POSTekyc(request):
+    if request.method == 'POST':
+        try:
+            transactionId = request.data['txnID']
+            eKYC_enc = request.data['eKYC']
+            passcode_enc = request.data['passcode']
+            filename = request.data['filename']
+
+            renterDeviceId = Transaction.objects.get(id=transactionId).requester.deviceID
+
+            OfflineEKYC.objects.create(
+                transactionId=transactionId,
+                encryptedEKYC=eKYC_enc,
+                encryptedPasscode=passcode_enc,
+                filename=filename,
+            )
+            print(transactionId, eKYC_enc, passcode_enc, filename)
+
+            message_caption = "Address Request Approved!"
+            message_body = "Hi There! Landlord has approved your request to share his address, please click the button to get the address"
+            message_data = {
+                'transactionId': transactionId,
+                'status': "200"
+            }
+            if sendPushNotification(renterDeviceId, message_caption, message_body, message_data):
+                return JsonResponse({
+                    'message':'Hello from the server!', 
+                    'txnID': transactionId
+                    }, status=200)
+            return JsonResponse({'message': 'Push Notification Failure', 'txnID': '-1'}, status=500)
+        except:
+            return JsonResponse({'message': 'POST request failed, please request again', 'txnID': '-1'}, status=500)
+
+    return JsonResponse({'message': 'Please "POST" the request', 'txnID': '-1'}, status=400)
 
 
+@api_view(['GET'])
+@check_token
+@request_interface(['txnID'])
+def GETekyc(request):
+    if request.method == 'GET':
+        try:
+            transactionId = request.data['txnID']
+            offlineEKYC = OfflineEKYC.objects.get(transactionId=transactionId)
+            
+            transaction = Transaction.objects.get(id=transactionId)
+            transaction.status = 'shared'
+            transaction.save()
+            
+            return JsonResponse({
+                'encryptedEKYC': offlineEKYC.encryptedEKYC,
+                'encryptedPasscode': offlineEKYC.encryptedPasscode,
+                'filename': offlineEKYC.filename,
+                'txnID': offlineEKYC.transactionId
+                }, status=200)
+        except:
+            return JsonResponse({'message': 'GET request failed, please request again', 'txnID': '-1'}, status=500)
 
-
+    return JsonResponse({'message': 'Please "GET" the request!', 'txnID': '-1'}, status=400)

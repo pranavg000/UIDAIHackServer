@@ -66,6 +66,15 @@ class Notifications(models.Model):
 
 
 
+class OfflineEKYC(models.Model):
+    transactionId = models.CharField(max_length=64, primary_key=True)
+    encryptedEKYC = models.TextField(blank=False, null=False)
+    encryptedPasscode = models.TextField(blank=False, null=False)
+    filename = models.CharField(max_length=50)
+
+
+
+
 
 
 
