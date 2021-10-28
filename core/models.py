@@ -4,12 +4,18 @@ from .choices import TRANSACTION_STATES
 class AnonProfile(models.Model):
     uidToken = models.CharField(max_length=30, primary_key=True)    # UIDAI UID Token
     authToken = models.CharField(max_length=256)                        # Token for communication with client app
-    deviceID = models.CharField(max_length=256)                         # For FCM
+    deviceID = models.CharField(max_length=256, unique=True)                         # For FCM
     publicKey = models.CharField(max_length=1024)
-    shareableCode = models.CharField(max_length=1024)
+    shareableCode = models.CharField(max_length=1024, unique=True)
 
     def __str__(self):
         return 'AnonProfile:' + self.uidToken
+
+# Dummy table for testing purposes. Will delete in final build
+class OTPAPISim(models.Model):
+    transactionNo = models.CharField(max_length=12, unique=True)
+    uid = models.CharField(max_length=12, primary_key=True)
+    uidToken = models.CharField(max_length=32, unique=True)
 
 
 class Ekyc(models.Model):

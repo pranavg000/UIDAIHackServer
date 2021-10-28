@@ -2,7 +2,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('auth', views.auth, name='auth'),
+    path('authuid', views.authUID, name='authuid'),
+    path('authotp', views.authOTP, name='authotp'),
+    # path('authfinal', views.authFinal, name='authfinal'),
     path('sendrequest', views.sendRequest, name='sendRequest'),
     # path('respondrequest', views.respondRequest, name='respondRequest'),
     # path('getpublickey', views.getPublicKey, name='getPublicKey'),

@@ -130,6 +130,8 @@ STATIC_URL = '/static/'
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 MEDIA_URL = '/media/'
 
+FIREBASE_SERVER_KEY = "AAAAi6j4zsk:APA91bFToAa06Jd6kyWdoi_21eoOvnmlZw4LPBVpHClj3OXEtgCOrkdDZPIQAPXwKrJv3J0hvncQ94rsVsblTVWWp2P5sKjZN5eLjzjYpt3vLjDiKtcSl1z1TNvZ_KED1ZxxDZ86UxwU"
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
 
