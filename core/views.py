@@ -167,6 +167,7 @@ def getPublicKey(request):
 
 
 @api_view(['POST'])
+@check_token
 @request_interface(['txnID', 'eKYC', 'passcode', 'filename'])
 def POSTekyc(request):
     if request.method == 'POST':
@@ -204,6 +205,7 @@ def POSTekyc(request):
 
 
 @api_view(['GET'])
+@check_token
 @request_interface(['txnID'])
 def GETekyc(request):
     if request.method == 'GET':
