@@ -14,6 +14,24 @@ import json
 from pyfcm import FCMNotification
 from .utils import getRandAlNum, getRandAl
 from math import dist, sin, cos, sqrt, atan2, radians
+import logging
+
+txnlogger = logging.getLogger('txnlog')
+authlogger = logging.getLogger('authlog')
+
+def redactUID(uid):
+    return 'X'*8+uid[-4:]
+
+def authlog(request, message):
+    authlogger.info(f"{request.data['transactionID']}:{redactUID(request.data['uid'])}:{message}")
+
+def txnlog(uidToken, message, transactionID="", transaction=None):
+    if transaction:
+        txnlogger.info(f"{uidToken}:{transaction.transactionID}:{transaction.lender.uidToken}:{transaction.requester.uidToken}:{transaction.state}:{message}")
+    else:
+        txnlogger.info(f"{uidToken}:{transactionID}::::{message}")
+
+
 
 push_notification_service = FCMNotification(api_key=settings.FIREBASE_SERVER_KEY)
 radar_api_key = 'prj_test_sk_f07c23cb9ac9fff33d38ccbb366375953cc0abc1'
@@ -61,7 +79,8 @@ def verifyOTPAuthAPI(transactionID, otp):
 
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
     # return True
-    result = push_notification_service.notify_single_device(registration_id=deviceID, message_title=messageTitle, message_body=messageBody, data_message=dataMessage)
+    result = push_notification_service.notify_single_device(registration_id=deviceID, message_title=messageTitle, message_body=messageBody)
+    result = push_notification_service.notify_single_device(registration_id=deviceID, data_message=dataMessage)
     if result['success'] == 1:
         return True
 
@@ -111,6 +130,9 @@ def authUID(request):
         # data = JSONParser.parse(request)
         
         transactionID = callOTPAPI(request.data['uid'])
+
+        request.data['transactionID'] = transactionID
+        authlog(request, "OTP initiated")
         
         return JsonResponse({'transactionID': transactionID}, status=200)
     return JsonResponse({}, status=400)
@@ -122,13 +144,18 @@ def authOTP(request):
     if request.method == 'POST':
         # data = JSONParser.parse(request)
         transactionID = request.data['transactionID']
+        authlog(request, "OTP verification initiated")
+
         result, uidToken = verifyOTPAuthAPI(transactionID, request.data['otp'])
         
         if not result:
+            authlog(request, "Invalid OTP")
             return JsonResponse({'body': "Wrong OTP", 'transactionID': transactionID}, status=403)
 
+        authlog(request, "Valid OTP")
         deviceID = request.data['deviceID']
         publicKey = request.data['publicKey']
+
 
         if AnonProfile.objects.filter(uidToken=uidToken).exists():
             profile = AnonProfile.objects.get(uidToken=uidToken)
@@ -136,12 +163,14 @@ def authOTP(request):
             profile.deviceID = deviceID
             profile.save()
 
+            authlog(request, "Resident already exists. Public key and deviceID updated")
             return JsonResponse({'shareableCode': profile.shareableCode, 'authToken': profile.authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
 
         shareableCode = genShareableCode()
         authToken = genAuthToken()
 
         AnonProfile.objects.create(uidToken=uidToken, authToken=authToken, deviceID=deviceID, publicKey=publicKey, shareableCode=shareableCode)
+        authlog(request, "New resident created")
         return JsonResponse({'shareableCode': shareableCode, 'authToken': authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
 
     return JsonResponse({}, status=403)
@@ -162,11 +191,17 @@ def sendRequest(request):
         Transaction.objects.filter(lender=lender, requester=requester).update(state='aborted')
         transaction = Transaction.objects.create(lender=lender, requester=requester)
         transactionID = transaction.transactionID
-        if sendPushNotification(lender.deviceID, "New Address Request", "New address request has been initiated", {'encryptedMessage': request.data['message'], 'transactionID': transaction.transactionID, 'status': transaction.state, 'requesterSC': requester.shareableCode}):
+
+        request.data['transactionID'] = transactionID       # Used in logging
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="New address change request received")
+
+        if sendPushNotification(lender.deviceID, "New Address Request", "Somebody has requested for your address", {'encryptedMessage': request.data['message'], 'transactionID': transaction.transactionID, 'status': transaction.state, 'requesterSC': requester.shareableCode}):
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request sent to lender")
             return JsonResponse({'body': 'Request sent to lender', 'transactionID': transactionID }, status=200)
         else:
             transaction.state = 'aborted'
             transaction.save()
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Unable to send request to lender. Aborting")
             return JsonResponse({'body': 'Unable to send request to lender. Aborting', 'transactionID': transactionID}, status=400)
 
     return JsonResponse({}, status=400)
@@ -177,17 +212,27 @@ def sendRequest(request):
 @request_interface(['transactionID'])
 def rejectRequest(request):
     if request.method == 'POST':
+        txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request rejection initiated by lender")
         try:
             transaction = Transaction.objects.get(transactionID=request.data['transactionID'])
             assert(transaction.state == 'init')
+            lender = transaction.lender
+            assert(lender == AnonProfile.objects.get(uidToken=request.data['uidToken']))
+            
         except:
+            txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Invalid transactionID. Transaction not rejected")
             return JsonResponse({'body': "Invalid transactionID"}, status=400)
 
         requester = transaction.requester
         transaction.state = 'rejected'
         transaction.save()
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request rejected by lender")
 
-        sendPushNotification(requester.deviceID, "Address request denied", f"Address request denied for TNo: {transaction.transactionID}", {'transactionID': transaction.transactionID})
+        if sendPushNotification(requester.deviceID, "Address request denied", f"Address request denied for TNo: {transaction.transactionID}", {'transactionID': transaction.transactionID, 'status': transaction.state}):
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Rejection notification delivered to requester")
+        else:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Rejection notification could not be delivered to requester")
+
         return JsonResponse({'body': 'Request denied successfully', 'transactionID': transaction.transactionID }, status=200)
         
 
@@ -199,10 +244,13 @@ def rejectRequest(request):
 @request_interface(['shareableCode'])
 def getPublicKey(request):
     if request.method == 'GET':
+        txnlog(uidToken=request.data['uidToken'], message=f"Public key of SC:{request.data['shareableCode']} requested")
         try:
             profile = AnonProfile.objects.get(shareableCode=request.data['shareableCode'])
+            txnlog(uidToken=request.data['uidToken'], message=f"Public key of SC:{request.data['shareableCode']}(uidToken:{profile.uidToken}) supplied")
             return JsonResponse({'publicKey': profile.publicKey}, status=200)
         except:
+            txnlog(uidToken=request.data['uidToken'], message="Invalid share code")
             return JsonResponse({'body': "Invalid share code"}, status=400)
 
     return JsonResponse({}, status=400)
@@ -213,16 +261,19 @@ def getPublicKey(request):
 @request_interface(['transactionID', 'eKYC', 'passcode', 'filename'])
 def POSTekyc(request):
     if request.method == 'POST':
-        
+        txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request acceptance initiated by lender")
         transactionID = request.data['transactionID']
         eKYC_enc = request.data['eKYC']
         passcode_enc = request.data['passcode']
         filename = request.data['filename']
 
         try:
-            transaction = Transaction.objects.get(id=transactionID)
-            renterDeviceId = transaction.requester.deviceID
+            transaction = Transaction.objects.get(transactionID=transactionID)
+            print(transaction.state)
             assert(transaction.state == 'init')
+            renterDeviceId = transaction.requester.deviceID
+            lender = transaction.lender
+            assert(lender == AnonProfile.objects.get(uidToken=request.data['uidToken']))
             transaction.state = 'accepted'
             transaction.save()
             OfflineEKYC.objects.create(
@@ -231,9 +282,11 @@ def POSTekyc(request):
                 encryptedPasscode=passcode_enc,
                 filename=filename,
             )
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request accepted by lender")
 
         except:
-            return JsonResponse({'message': 'POST request failed, please request again', 'transactionID': transactionID}, status=500)
+            txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID. Address request acceptance failed")
+            return JsonResponse({'message': 'Invalid transactionID. Address request acceptance failed', 'transactionID': transactionID}, status=400)
 
         
         # print(transactionID, eKYC_enc, passcode_enc, filename)
@@ -245,12 +298,15 @@ def POSTekyc(request):
             'status': "200"
         }
         if sendPushNotification(renterDeviceId, message_caption, message_body, message_data):
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification delivered to requester")
             return JsonResponse({
                 'message':'Hello from the server!', 
                 'transactionID': transactionID,
                 'status': transaction.state
                 }, status=200)
-        return JsonResponse({'message': 'Push Notification Failure', 'transactionID': transactionID, 'status': transaction.state}, status=500)
+
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification could not be delivered to requester")
+        return JsonResponse({'message': 'Push Notification Failure', 'transactionID': transactionID, 'status': transaction.state}, status=400)
 
     return JsonResponse({'message': 'Please "POST" the request', 'transactionID': '-1'}, status=400)
 
@@ -260,15 +316,20 @@ def POSTekyc(request):
 @request_interface(['transactionID'])
 def GETekyc(request):
     if request.method == 'GET':
-
+        txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="eKYC fetch initiated by requested")
+        
         transactionID = request.data['transactionID']
         try:
-            transaction = Transaction.objects.get(id=transactionID)
+            transaction = Transaction.objects.get(transactionID=transactionID)
             assert(transaction.state == 'accepted')
+            requester = transaction.requester
+            assert(requester == AnonProfile.objects.get(uidToken=request.data['uidToken']))
             offlineEKYC = OfflineEKYC.objects.get(transactionID=transactionID)
             
-            transaction.status = 'shared'
+            transaction.state = 'shared'
             transaction.save()
+
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="eKYC sent to requester")
             
             return JsonResponse({
                 'encryptedEKYC': offlineEKYC.encryptedEKYC,
@@ -278,7 +339,8 @@ def GETekyc(request):
                 'status': transaction.state
                 }, status=200)
         except:
-            return JsonResponse({'message': 'GET request failed, please request again', 'transactionID': transactionID}, status=500)
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Invalid transactionID. Unable to send eKYC to requester")
+            return JsonResponse({'message': 'Invalid transactionID. Unable to send eKYC to requester', 'transactionID': transactionID}, status=500)
 
     return JsonResponse({'message': 'Please "GET" the request!', 'transactionID': '-1'}, status=400)
 
@@ -288,20 +350,26 @@ def GETekyc(request):
 def updateAddress(request):
     if request.method == 'POST':
         transactionID = request.data['transactionID']
+        txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Final address update initiated by requester")
         try:
-            requester = AnonProfile.objects.get(uidToken=request.data['uidToken'])
+            
             transaction = Transaction.objects.get(transactionID=transactionID)
-            assert(transaction.requester == requester)
+            requester = transaction.requester
+            assert(requester == AnonProfile.objects.get(uidToken=request.data['uidToken']))
             assert(transaction.state == 'shared')
         except:
+            txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID")
             return JsonResponse({'body': "Invalid transactionID"}, status=400)
 
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address verification initiated")
         oldCoord = getCoord(request.data['oldAddress'])
         if not oldCoord:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Lender's address is invalid")
             return JsonResponse({'body': 'Old address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=400)
         
         newCoord = getCoord(request.data['newAddress'])
         if not newCoord:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address is invalid")
             return JsonResponse({'body': 'New address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=400)
         
         gpsCoord = request.data['gpsCoord']
@@ -309,14 +377,24 @@ def updateAddress(request):
         distance2 = getDistance(gpsCoord, newCoord)
         # print(gpsCoord, distance1, distance2)
         if distance1 < 0.4 and distance2 < 1:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address verified")
             try:
                 UpdatedAddress.objects.create(**(request.data['newAddress']), uid=request.data['uid'], transactionID=transactionID)
                 transaction.state = 'commited'
                 transaction.save()
-                sendPushNotification(transaction.lender.deviceID, "Requester's address has been updated", f"Requester's address for TNo: {transactionID} has been updated", {'requesterSC': requester.shareableCode, 'newAddress': request.data['newAddress']})
+                txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address committed to DB")
+
+                if sendPushNotification(transaction.lender.deviceID, "Requester's address has been updated", f"Requester's address for TNo: {transactionID} has been updated", {'requesterSC': requester.shareableCode, 'newAddress': request.data['newAddress'], 'transactionID': transaction.transactionID, 'status': transaction.state}):
+                    txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address update notification sent to Lender")
+                else:
+                    txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address update notification could not be sent to Lender")
                 return JsonResponse({'transactionID': transactionID, 'status': transaction.state}, status=200)
             except:
+                txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address could not be committed to DB")
                 return JsonResponse({'body': 'Repeated TransactionID', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+
+        
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message=f"Addresses are too far. Distance from gps: {distance2}, dist from lender's address: {distance1}")
         return JsonResponse({'body': f'Addresses are too far. Dist from gps: {distance2}, dist from oldAddress: {distance1}', 'transactionID': transactionID, 'status': transaction.state}, status=400)
 
     return JsonResponse({}, status=400)
