@@ -136,3 +136,67 @@ FIREBASE_SERVER_KEY = "AAAAi6j4zsk:APA91bFToAa06Jd6kyWdoi_21eoOvnmlZw4LPBVpHClj3
 # https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        # 'gen': {
+        #     'format': '{levelname} {message}',
+        #     'style': '{',
+        # },
+        'norm': {
+            'format': '{levelname}:{asctime}:{funcName}:{lineno:d}:{message}',
+            'style': '{',
+        },
+    },
+    # 'filters': {
+    #     'special': {
+    #         '()': 'project.logging.SpecialFilter',
+    #         'foo': 'bar',
+    #     },
+    #     'require_debug_true': {
+    #         '()': 'django.utils.log.RequireDebugTrue',
+    #     },
+    # },
+    'handlers': {
+        'genlog': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': './logs/general.log',
+            'formatter': 'norm'
+        },
+        'authlog': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': './logs/auth.log',
+            'formatter': 'norm'
+        },
+        'txnlog': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': './logs/txn.log',
+            'formatter': 'norm'
+        },
+
+    },
+    'loggers': {
+        # 'django': {
+        #     'handlers': ['console'],
+        #     'propagate': True,
+        # },
+        'django.server': {
+            'handlers': ['genlog'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'authlog': {
+            'handlers': ['authlog'],
+            'level': 'DEBUG',
+        },
+        'txnlog': {
+            'handlers': ['txnlog'],
+            'level': 'DEBUG',
+        }
+    }
+}
