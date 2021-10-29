@@ -139,14 +139,14 @@ def authUID(request):
     if request.method == 'POST':
         # data = JSONParser.parse(request)
         
-        txnId = callOTPAPI(request.data['uid'])
+        transactionID = callOTPAPI(request.data['uid'])
         
-        if(txnId == -1):
-            authlog(uid=request.data['uid'], transactionID=txnId, message="OTP API request failed")
-            return JsonResponse({'txnId': txnId, 'message': 'API request failed, please try again'}, status=500)
+        if(transactionID == -1):
+            authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP API request failed")
+            return JsonResponse({'transactionID': transactionID, 'message': 'API request failed, please try again'}, status=500)
         
-        authlog(uid=request.data['uid'], transactionID=txnId, message="OTP initiated")
-        return JsonResponse({'txnId': txnId}, status=200)
+        authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP initiated")
+        return JsonResponse({'transactionID': transactionID}, status=200)
 
     return JsonResponse({}, status=400)
 
