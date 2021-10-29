@@ -121,7 +121,7 @@ def sendRequest(request):
 
         Transaction.objects.filter(lender=lender, requester=requester).update(state='aborted')
         transaction = Transaction.objects.create(lender=lender, requester=requester)
-        if sendPushNotification(lender.deviceID, "New Address Request", "New address request has been initiated", {'encryptedMessage': request.data['message']}):
+        if sendPushNotification(lender.deviceID, "New Address Request", "New address request has been initiated", {'encryptedMessage': request.data['message'], 'transactionNo': transaction.transactionNo, 'status': transaction.state}):
             return JsonResponse({'body': 'Request sent to lender', 'transactionNo': transaction.transactionNo }, status=200)
         else:
             transaction.state = 'aborted'
