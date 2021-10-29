@@ -22,8 +22,8 @@ authlogger = logging.getLogger('authlog')
 def redactUID(uid):
     return 'X'*8+uid[-4:]
 
-def authlog(request, message):
-    authlogger.info(f"{request.data['transactionID']}:{redactUID(request.data['uid'])}:{message}")
+def authlog(message, uid, transactionID=""):
+    authlogger.info(f"{transactionID}:{redactUID(uid)}:{message}")
 
 def txnlog(uidToken, message, transactionID="", transaction=None):
     if transaction:
@@ -129,12 +129,11 @@ def authUID(request):
     if request.method == 'POST':
         # data = JSONParser.parse(request)
         
-        transactionID = callOTPAPI(request.data['uid'])
+        txnId = callOTPAPI(request.data['uid'])
 
-        request.data['transactionID'] = transactionID
-        authlog(request, "OTP initiated")
+        authlog(uid=request.data['uid'], transactionID=txnId, message="OTP initiated")
         
-        return JsonResponse({'transactionID': transactionID}, status=200)
+        return JsonResponse({'transactionID': txnId}, status=200)
     return JsonResponse({}, status=400)
 
 
@@ -144,15 +143,16 @@ def authOTP(request):
     if request.method == 'POST':
         # data = JSONParser.parse(request)
         transactionID = request.data['transactionID']
-        authlog(request, "OTP verification initiated")
+
+        authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="OTP verification initiated")
 
         result, uidToken = verifyOTPAuthAPI(transactionID, request.data['otp'])
         
         if not result:
-            authlog(request, "Invalid OTP")
+            authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Invalid OTP")
             return JsonResponse({'body': "Wrong OTP", 'transactionID': transactionID}, status=403)
 
-        authlog(request, "Valid OTP")
+        authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="OTP verified")
         deviceID = request.data['deviceID']
         publicKey = request.data['publicKey']
 
@@ -163,14 +163,14 @@ def authOTP(request):
             profile.deviceID = deviceID
             profile.save()
 
-            authlog(request, "Resident already exists. Public key and deviceID updated")
+            authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Resident already exists. Public key and deviceID updated")
             return JsonResponse({'shareableCode': profile.shareableCode, 'authToken': profile.authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
 
         shareableCode = genShareableCode()
         authToken = genAuthToken()
 
         AnonProfile.objects.create(uidToken=uidToken, authToken=authToken, deviceID=deviceID, publicKey=publicKey, shareableCode=shareableCode)
-        authlog(request, "New resident created")
+        authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="New resident created")
         return JsonResponse({'shareableCode': shareableCode, 'authToken': authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
 
     return JsonResponse({}, status=403)
