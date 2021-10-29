@@ -4,17 +4,16 @@ from django.shortcuts import render
 from rest_framework.parsers import JSONParser
 from rest_framework.decorators import api_view
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 from .models import *
 from .decorators import check_token, request_interface
 from django.conf import settings
-from django.core.files.storage import default_storage
 import requests
 import json
 from pyfcm import FCMNotification
 from .utils import getRandAlNum, getRandAl
 from math import dist, sin, cos, sqrt, atan2, radians
 import logging
+import uuid
 
 txnlogger = logging.getLogger('txnlog')
 authlogger = logging.getLogger('authlog')
@@ -51,30 +50,41 @@ def genShareableCode():
 
 def callOTPAPI(uid):
     #TODO: OTP API (AN) 
-    transactionID = ""
-    while(transactionID=="" or OTPAPISim.objects.filter(transactionID=transactionID).exists()):
-        transactionID = getRandAlNum(5)
-    
-    
-    if OTPAPISim.objects.filter(uid=uid).exists():
-        banda = OTPAPISim.objects.get(uid=uid)
-        banda.transactionID = transactionID
-        banda.save()
-        return transactionID
-    
-    uidToken = ""
-    while(uidToken=="" or OTPAPISim.objects.filter(uidToken=uidToken).exists()):
-        uidToken = getRandAlNum(16)
 
-    OTPAPISim.objects.create(uid=uid, transactionID=transactionID, uidToken=uidToken)
+    txnId = uuid.uuid4()
+    
+    headers = {
+        "content-type": "application/json"
+    }
+    data = {
+        "uid": str(uid),
+        "txnId": str(txnId)
+    }
+    getOtpApiUrl = 'https://stage1.uidai.gov.in/onlineekyc/getOtp/'
 
-    return transactionID
+    response = requests.post(getOtpApiUrl, json=data, headers=headers).json()
+    respStatus = response['status']
+    respCode = response['errCode']
 
-def verifyOTPAuthAPI(transactionID, otp):
-    if otp == '12345':
-        if OTPAPISim.objects.filter(transactionID=transactionID).exists():
-            uidToken = OTPAPISim.objects.get(transactionID=transactionID).uidToken
-            return True, uidToken
+    if(respStatus and (respStatus == 'y' or respStatus == 'Y')):
+        return txnId
+    return -1
+
+def verifyOTPAuthAPI(txnId, otp, uid):
+
+    headers = {
+        "content-type": "application/json"
+    }
+    data = {
+        "uid": str(uid),
+        "txnId": str(txnId),
+        "otp": str(otp)
+    }
+    getAuthApiUrl = 'https://stage1.uidai.gov.in/onlineekyc/getAuth/'
+    response = requests.post(getAuthApiUrl, json=data, headers=headers).json()
+    # print(">>>>>>>>>>>>>>>>>>>", response)
+    if response['status'] and (response['status'] == 'y' or response['status'] == 'Y'):
+        return True, uid
     return False, None
 
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
@@ -117,7 +127,7 @@ def getCoord(address):
 
     response = requests.get('https://api.radar.io/v1/geocode/forward?query='+addressS, headers={'Authorization': radar_api_key})
     if response.status_code != 200:
-        print("FFFFFFFFFFFFFFFFFF Geocode failed at ",addressS)
+        # print("FFFFFFFFFFFFFFFFFF Geocode failed at ",addressS)
         return False
     coord = json.loads(response.content)['addresses'][0]
     return (coord['latitude'], coord['longitude'])
@@ -130,27 +140,33 @@ def authUID(request):
         # data = JSONParser.parse(request)
         
         txnId = callOTPAPI(request.data['uid'])
-
-        authlog(uid=request.data['uid'], transactionID=txnId, message="OTP initiated")
         
-        return JsonResponse({'transactionID': txnId}, status=200)
+        if(txnId == -1):
+            authlog(uid=request.data['uid'], transactionID=txnId, message="OTP API request failed")
+            return JsonResponse({'txnId': txnId, 'message': 'API request failed, please try again'}, status=500)
+        
+        authlog(uid=request.data['uid'], transactionID=txnId, message="OTP initiated")
+        return JsonResponse({'txnId': txnId}, status=200)
+
     return JsonResponse({}, status=400)
 
 
 @api_view(['POST'])
-@request_interface(['transactionID', 'otp', 'deviceID', 'publicKey'])
+@request_interface(['transactionID', 'otp', 'deviceID', 'publicKey', 'uid'])
 def authOTP(request):
     if request.method == 'POST':
         # data = JSONParser.parse(request)
+
         transactionID = request.data['transactionID']
+        uid = request.data['uid']
+        authlog(uid=uid, transactionID=request.data['transactionID'], message="OTP verification initiated")
 
-        authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="OTP verification initiated")
-
-        result, uidToken = verifyOTPAuthAPI(transactionID, request.data['otp'])
+        result, uidToken = verifyOTPAuthAPI(transactionID, request.data['otp'], uid)
         
         if not result:
             authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Invalid OTP")
             return JsonResponse({'body': "Wrong OTP", 'transactionID': transactionID}, status=403)
+
 
         authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="OTP verified")
         deviceID = request.data['deviceID']
@@ -163,15 +179,35 @@ def authOTP(request):
             profile.deviceID = deviceID
             profile.save()
 
+
             authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Resident already exists. Public key and deviceID updated")
-            return JsonResponse({'shareableCode': profile.shareableCode, 'authToken': profile.authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
+            return JsonResponse({
+                'shareableCode': profile.shareableCode, 
+                'authToken': profile.authToken, 
+                'uidToken': uidToken, 
+                'transactionID': transactionID
+                }, status=200)
 
         shareableCode = genShareableCode()
         authToken = genAuthToken()
 
-        AnonProfile.objects.create(uidToken=uidToken, authToken=authToken, deviceID=deviceID, publicKey=publicKey, shareableCode=shareableCode)
+        AnonProfile.objects.create(
+            uidToken=uidToken, 
+            authToken=authToken, 
+            deviceID=deviceID, 
+            publicKey=publicKey, 
+            shareableCode=shareableCode
+            )
+         
         authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="New resident created")
-        return JsonResponse({'shareableCode': shareableCode, 'authToken': authToken, 'uidToken': uidToken, 'transactionID': transactionID}, status=200)
+
+        return JsonResponse({
+            'shareableCode': shareableCode, 
+            'authToken': authToken, 
+            'uidToken': uidToken, 
+            'transactionID': transactionID
+            }, status=200)
+
 
     return JsonResponse({}, status=403)
 
@@ -295,7 +331,7 @@ def POSTekyc(request):
         message_body = "Hi There! Landlord has approved your request to share his address, please click the button to get the address"
         message_data = {
             'transactionID': transactionID,
-            'status': "200"
+            'status': transaction.state
         }
         if sendPushNotification(renterDeviceId, message_caption, message_body, message_data):
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification delivered to requester")
