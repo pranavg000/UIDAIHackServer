@@ -349,11 +349,11 @@ def POSTekyc(request):
     return JsonResponse({'message': 'Please "POST" the request', 'transactionID': '-1'}, status=400)
 
 
-@api_view(['GET'])
+@api_view(['POST'])
 @check_token
 @request_interface(['transactionID'])
 def GETekyc(request):
-    if request.method == 'GET':
+    if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="eKYC fetch initiated by requested")
         
         transactionID = request.data['transactionID']
