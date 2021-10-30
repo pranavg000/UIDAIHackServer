@@ -276,11 +276,11 @@ def rejectRequest(request):
     return JsonResponse({}, status=400)
 
 
-@api_view(['GET'])
+@api_view(['POST'])
 @check_token
 @request_interface(['shareableCode'])
 def getPublicKey(request):
-    if request.method == 'GET':
+    if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], message=f"Public key of SC:{request.data['shareableCode']} requested")
         try:
             profile = AnonProfile.objects.get(shareableCode=request.data['shareableCode'])
