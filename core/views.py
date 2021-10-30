@@ -92,6 +92,7 @@ def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
     # return True
     result = push_notification_service.notify_single_device(registration_id=deviceID, message_title=messageTitle, message_body=messageBody)
     result = push_notification_service.notify_single_device(registration_id=deviceID, data_message=dataMessage)
+    txnlog("FFF", message=json.dumps(dataMessage))
     if result['success'] == 1:
         return True
 
