@@ -14,6 +14,7 @@ from .utils import getRandAlNum, getRandAl
 from math import dist, sin, cos, sqrt, atan2, radians
 import logging
 import uuid
+from hashlib import sha256
 
 txnlogger = logging.getLogger('txnlog')
 authlogger = logging.getLogger('authlog')
@@ -84,7 +85,7 @@ def verifyOTPAuthAPI(txnId, otp, uid):
     response = requests.post(getAuthApiUrl, json=data, headers=headers).json()
     # print(">>>>>>>>>>>>>>>>>>>", response)
     if response['status'] and (response['status'] == 'y' or response['status'] == 'Y'):
-        return True, uid
+        return True, sha256(uid.encode()).hexdigest()
     return False, None
 
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
@@ -146,7 +147,7 @@ def authUID(request):
             return JsonResponse({'transactionID': transactionID, 'message': 'API request failed, please try again'}, status=500)
         
         authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP initiated")
-        return JsonResponse({'transactionID': transactionID}, status=200)
+        return JsonResponse({'transactionID': transactionID, 'message': 'OTP initiated'}, status=200)
 
     return JsonResponse({}, status=400)
 
