@@ -426,7 +426,7 @@ def updateAddress(request):
                     txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address update notification sent to Lender")
                 else:
                     txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address update notification could not be sent to Lender")
-                return JsonResponse({'transactionID': transactionID, 'status': transaction.state}, status=200)
+                return JsonResponse({'body': 'Success', transactionID': transactionID, 'status': transaction.state}, status=200)
             except:
                 txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address could not be committed to DB")
                 return JsonResponse({'body': 'Repeated TransactionID', 'transactionID': transactionID, 'status': transaction.state}, status=400)
