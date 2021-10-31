@@ -239,31 +239,16 @@ def getCoord(address):
 
 import pickle
 def getAddressHashFromOfflineEKyc(eekyc, passcode):
-    print("func call>>>>>>>>>>>>>>>>>>>>>>")
     ekycx = eekyc['eKycXML']
     filename = eekyc['fileName'].split('.')[0]
-    print(filename)
     dekyc = base64.b64decode(ekycx)
     z = zipfile.ZipFile(io.BytesIO(dekyc))
     z.setpassword(passcode.encode())
     ez = {name: z.read(name) for name in z.namelist()}
-    with open('a.pickle','wb') as f:
-        pickle.dump(ez,f)
-
-    with open('a.pickle','rb') as f:
-        a=pickle.load(f)
-
-    xmls=list(a.values())[0]
-    print(">>>>>>>>>>>>>>>>>>")
-    print(xmls)
+    xmls=list(ez.values())[0]
     root = ET.fromstring(xmls)
 
-    print(">>>>>>>>>>>>>>>>>>")
-    print(root)
-    print(">>>>>>>>>>>>>>>>>>")
     response_dict = root.find('UidData').find('Poa').attrib
-    print(">>>>>>>>>>>>>>>>>>")
-    print(response_dict)
     co = response_dict['careof']
     response_dict['co'] = co
     del response_dict['careof']
@@ -470,7 +455,7 @@ def getPublicKey(request):
 
 @api_view(['POST'])
 @check_token
-@request_interface(['transactionID', 'txnNumber', 'otp', 'uid'])
+@request_interface(['transactionID', 'txnNumber', 'otp', 'uid', 'epss', 'pss'])
 def POSTekyc(request):
     if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request acceptance initiated by lender")
@@ -478,7 +463,7 @@ def POSTekyc(request):
         uid = request.data['uid']
         otp = request.data['otp']
         txnNumber = request.data['txnNumber']
-        passcode = str(uuid.uuid4())[-4:]
+        passcode = request.data['pss']
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
@@ -512,18 +497,13 @@ def POSTekyc(request):
                 print(">>>>>>>>>>>>>>>>>>")
                 eekyc = response
                 lenderAddress = getAddressHashFromOfflineEKyc(eekyc, passcode);
-                print(lenderAddress)
-                encrypted_passcode = encryptByPublicKey(passcode, lender.publicKey)
-                print(encrypted_passcode)
-                print(">>>>>>>>>>>>>>>>>>")
-
 
                 #store in the db
                 try:
                     OfflineEKYC.objects.create(
                         transactionID=transactionID,
                         encryptedEKYC=lenderAddress,
-                        encryptedPasscode=encrypted_passcode,
+                        encryptedPasscode=request.data['epss'],
                     )
                 except:
                     txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Database storage failure. Address request acceptance failed")
