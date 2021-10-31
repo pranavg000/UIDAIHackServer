@@ -462,7 +462,7 @@ def POSTekyc(request):
         uid = request.data['uid']
         otp = request.data['otp']
         txnNumber = request.data['txnNumber']
-        passcode = str(uuid.uuid4()[-4])
+        passcode = str(uuid.uuid4())[-4]
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
