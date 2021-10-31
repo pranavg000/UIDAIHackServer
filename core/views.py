@@ -317,7 +317,7 @@ def POSTekyc(request):
             transaction = Transaction.objects.get(transactionID=transactionID)
             # print(transaction.state)
             assert(transaction.state == 'init')
-            renterDeviceId = transaction.requester.deviceID
+            requesterDeviceId = transaction.requester.deviceID
             lender = transaction.lender
             assert(lender == AnonProfile.objects.get(uidToken=request.data['uidToken']))
             transaction.state = 'accepted'
@@ -338,12 +338,12 @@ def POSTekyc(request):
         # print(transactionID, eKYC_enc, passcode_enc, filename)
 
         message_caption = "Address Request Approved!"
-        message_body = "Hi There! Landlord has approved your request to share his address, please click the button to get the address"
+        message_body = "Hi There! Lender has approved your request to share his address, please click the button to get the address"
         message_data = {
             'transactionID': transactionID,
             'status': transaction.state
         }
-        if sendPushNotification(renterDeviceId, message_caption, message_body, message_data):
+        if sendPushNotification(requesterDeviceId, message_caption, message_body, message_data):
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification delivered to requester")
             return JsonResponse({
                 'message':'Hello from the server!', 
