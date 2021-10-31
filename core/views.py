@@ -15,6 +15,15 @@ from math import dist, sin, cos, sqrt, atan2, radians
 import logging
 import uuid
 from hashlib import sha256
+import base64
+import zipfile
+import io
+import xml.etree.ElementTree as ET
+from base64 import b64decode
+from base64 import b64encode
+
+# from Crypto.PublicKey import RSA
+# from Crypto.Cipher import PKCS1_v1_5
 
 txnlogger = logging.getLogger('txnlog')
 authlogger = logging.getLogger('authlog')
@@ -136,6 +145,31 @@ def getCoord(address):
     coord = json.loads(response.content)['addresses'][0]
     return (coord['latitude'], coord['longitude'])
 
+
+
+def getAddressHashFromOfflineEKyc(eekyc, passcode):
+    ekycx = eekyc["eKycXML"]
+    filename = eekyc['filename'].split('.')[0]
+    dekyc = base64.b64decode(ekycx)
+    z = zipfile.ZipFile(io.BytesIO(dekyc))
+    z.setpassword(passcode.encode())
+    ez = {name: z.read(name) for name in z.namelist()}
+    xmls = ez[filename+'.xml']
+    root = ET.fromstring(xmls)
+    response_dict = root.find('UidData').find('Poa').attrib
+    co = response_dict['careof']
+    response_dict['co'] = co
+    del response_dict['careof']
+    return sha256(str(response_dict).encode()).hexdigest()
+
+def encryptByPublicKey(s, public_key):
+    key = b64decode(public_key)
+    key = RSA.importKey(key)
+
+    cipher = PKCS1_v1_5.new(key)
+    ciphertext = b64encode(cipher.encrypt(bytes(s, "utf-8")))
+
+    return ciphertext
 
 @api_view(['POST'])
 @request_interface(['uid'])
@@ -304,14 +338,15 @@ def getPublicKey(request):
 
 @api_view(['POST'])
 @check_token
-@request_interface(['transactionID', 'eKYC', 'passcode', 'filename'])
+@request_interface(['transactionID', 'txnNumber', 'otp', 'uid'])
 def POSTekyc(request):
     if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request acceptance initiated by lender")
         transactionID = request.data['transactionID']
-        eKYC_enc = request.data['eKYC']
-        passcode_enc = request.data['passcode']
-        filename = request.data['filename']
+        uid = request.data['uid']
+        otp = request.data['otp']
+        txnNumber = request.data['txnNumber']
+        passcode = str(uuid.uuid4()[-4])
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
@@ -320,23 +355,61 @@ def POSTekyc(request):
             requesterDeviceId = transaction.requester.deviceID
             lender = transaction.lender
             assert(lender == AnonProfile.objects.get(uidToken=request.data['uidToken']))
-            transaction.state = 'accepted'
-            transaction.save()
-            OfflineEKYC.objects.create(
-                transactionID=transactionID,
-                encryptedEKYC=eKYC_enc,
-                encryptedPasscode=passcode_enc,
-                filename=filename,
-            )
-            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request accepted by lender")
+
+            #new flow to call AAdhaar eKYC(offline) API
+            headers = {
+                "content-type": "application/json"
+            }
+            data = {
+                "uid": str(uid),
+                "txnNumber": str(txnNumber),
+                "otp": str(otp),
+                "shareCode": str(passcode)
+            }
+            response = requests.post(
+                'https://stage1.uidai.gov.in/eAadhaarService/api/downloadOfflineEkyc',
+                headers=headers,
+                json=data
+            ).json()
+
+            if(response['status'] == 'Success' or response['status'] == 'success'):
+                eekyc = response['eKycXML']
+                lenderAddress = getAddressHashFromOfflineEKyc(eekyc, passcode);
+                encrypted_passcode = encryptByPublicKey(passcode, lender.publicKey)
+
+                #store in the db
+                try:
+                    OfflineEKYC.objects.create(
+                        transactionID=transactionID,
+                        encryptedEKYC=lenderAddress,
+                        encryptedPasscode=encrypted_passcode,
+                    )
+                except:
+                    txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Database storage failure. Address request acceptance failed")
+                    return JsonResponse({
+                        'message': 'Invalid transactionID. Address request acceptance failed', 
+                        'transactionID': transactionID
+                        }, status=500)
+
+                transaction.state = 'accepted'
+                transaction.save()
+                txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request accepted by lender")
+
+            else:
+                txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Aadhaar API request failed")
+                return JsonResponse({
+                    'message': 'Aadhaar API failure. Address request acceptance failed', 
+                    'transactionID': transactionID
+                    }, status=501)
 
         except:
             txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID. Address request acceptance failed")
-            return JsonResponse({'message': 'Invalid transactionID. Address request acceptance failed', 'transactionID': transactionID}, status=403)
+            return JsonResponse({
+                'message': 'Invalid transactionID. Address request acceptance failed', 
+                'transactionID': transactionID
+                }, status=403)
 
         
-        # print(transactionID, eKYC_enc, passcode_enc, filename)
-
         message_caption = "Address Request Approved!"
         message_body = "Hi There! Lender has approved your request to share his address, please click the button to get the address"
         message_data = {
@@ -348,13 +421,19 @@ def POSTekyc(request):
             return JsonResponse({
                 'message':'Hello from the server!', 
                 'transactionID': transactionID,
-                'status': transaction.state
+                'status': transaction.state,
                 }, status=200)
 
         txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification could not be delivered to requester")
-        return JsonResponse({'message': 'Push Notification Failure', 'transactionID': transactionID, 'status': transaction.state}, status=502)
+        return JsonResponse({
+            'message': 'Push Notification Failure', 
+            'transactionID': transactionID, 'status': transaction.state
+            }, status=502)
 
-    return JsonResponse({'message': 'Please "POST" the request', 'transactionID': '-1'}, status=400)
+    return JsonResponse({
+        'message': 'Please "POST" the request', 
+        'transactionID': '-1'
+        }, status=400)
 
 
 @api_view(['POST'])
@@ -380,9 +459,9 @@ def GETekyc(request):
             return JsonResponse({
                 'encryptedEKYC': offlineEKYC.encryptedEKYC,
                 'encryptedPasscode': offlineEKYC.encryptedPasscode,
-                'filename': offlineEKYC.filename,
                 'transactionID': offlineEKYC.transactionID,
-                'status': transaction.state
+                'status': transaction.state,
+                'filename': "null"
                 }, status=200)
         except:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Invalid transactionID. Unable to send eKYC to requester")
@@ -409,7 +488,16 @@ def updateAddress(request):
 
         txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address verification initiated")
         oldCoord = getCoord(request.data['oldAddress'])
-        if not oldCoord:
+
+        try:
+            offlineEKYC = OfflineEKYC.objects.get(transactionID=transactionID)
+            encrEkycOld = offlineEKYC.encryptedEKYC
+            checkSum = (sha256(str(request.data['oldAddress']).encode()).hexdigest() == encrEkycOld)
+        except:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Database read failure")
+            return JsonResponse({'body': 'Database read faliure, address not committed', 'transactionID': transactionID, 'status': transaction.state}, status=500)
+
+        if not oldCoord and checkSum:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Lender's address is invalid")
             return JsonResponse({'body': 'Old address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=403)
         
