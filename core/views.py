@@ -496,13 +496,15 @@ def POSTekyc(request):
             if(response['status'] == 'Success' or response['status'] == 'success'):
                 print(">>>>>>>>>>>>>>>>>>")
                 eekyc = response
+                amanko = eekyc['eKycXML']
                 lenderAddress = getAddressHashFromOfflineEKyc(eekyc, passcode);
 
                 #store in the db
                 try:
                     OfflineEKYC.objects.create(
                         transactionID=transactionID,
-                        encryptedEKYC=lenderAddress,
+                        encryptedEKYC = amanko,
+                        hashv = lenderAddress,
                         encryptedPasscode=request.data['epss'],
                     )
                 except:

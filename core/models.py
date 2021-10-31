@@ -69,6 +69,7 @@ class Transaction(models.Model):
 class OfflineEKYC(models.Model):
     transactionID = models.CharField(max_length=64, primary_key=True)
     encryptedEKYC = models.TextField(blank=False, null=False)
+    hashv = models.TextField(default="")
     encryptedPasscode = models.TextField(blank=False, null=False)
 
 
