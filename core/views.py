@@ -462,7 +462,7 @@ def POSTekyc(request):
         uid = request.data['uid']
         otp = request.data['otp']
         txnNumber = request.data['txnNumber']
-        passcode = str(uuid.uuid4())[-4]
+        passcode = str(uuid.uuid4())[-4:]
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
@@ -482,10 +482,11 @@ def POSTekyc(request):
                 "otp": str(otp),
                 "shareCode": str(passcode)
             }
+            # print("data", data)
             response = requests.post(
                 'https://stage1.uidai.gov.in/eAadhaarService/api/downloadOfflineEkyc',
+                json=data,
                 headers=headers,
-                json=data
             ).json()
 
             if(response['status'] == 'Success' or response['status'] == 'success'):
@@ -639,7 +640,7 @@ def updateAddress(request):
                 transaction.state = 'commited'
                 transaction.save()
                 txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address committed to DB")
-
+                txnlog(uidToken=request.data['uidToken'], transaction=transaction, message=f"lender's address for auditing - {str(request.data['oldAddress'])}")
                 if sendPushNotification(transaction.lender.deviceID, "Requester's address has been updated", f"Requester's address for TNo: {transactionID} has been updated", {'requesterSC': requester.shareableCode, 'newAddress': request.data['newAddress'], 'transactionID': transaction.transactionID, 'status': transaction.state}):
                     txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address update notification sent to Lender")
                 else:
