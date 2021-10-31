@@ -22,8 +22,8 @@ import xml.etree.ElementTree as ET
 from base64 import b64decode
 from base64 import b64encode
 
-# from Crypto.PublicKey import RSA
-# from Crypto.Cipher import PKCS1_v1_5
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5
 
 txnlogger = logging.getLogger('txnlog')
 authlogger = logging.getLogger('authlog')
@@ -237,17 +237,33 @@ def getCoord(address):
     return (coord['latitude'], coord['longitude'])
 
 
-
+import pickle
 def getAddressHashFromOfflineEKyc(eekyc, passcode):
-    ekycx = eekyc["eKycXML"]
-    filename = eekyc['filename'].split('.')[0]
+    print("func call>>>>>>>>>>>>>>>>>>>>>>")
+    ekycx = eekyc['eKycXML']
+    filename = eekyc['fileName'].split('.')[0]
+    print(filename)
     dekyc = base64.b64decode(ekycx)
     z = zipfile.ZipFile(io.BytesIO(dekyc))
     z.setpassword(passcode.encode())
     ez = {name: z.read(name) for name in z.namelist()}
-    xmls = ez[filename+'.xml']
+    with open('a.pickle','wb') as f:
+        pickle.dump(ez,f)
+
+    with open('a.pickle','rb') as f:
+        a=pickle.load(f)
+
+    xmls=list(a.values())[0]
+    print(">>>>>>>>>>>>>>>>>>")
+    print(xmls)
     root = ET.fromstring(xmls)
+
+    print(">>>>>>>>>>>>>>>>>>")
+    print(root)
+    print(">>>>>>>>>>>>>>>>>>")
     response_dict = root.find('UidData').find('Poa').attrib
+    print(">>>>>>>>>>>>>>>>>>")
+    print(response_dict)
     co = response_dict['careof']
     response_dict['co'] = co
     del response_dict['careof']
@@ -260,7 +276,7 @@ def encryptByPublicKey(s, public_key):
     cipher = PKCS1_v1_5.new(key)
     ciphertext = b64encode(cipher.encrypt(bytes(s, "utf-8")))
 
-    return ciphertext
+    return b64decode(ciphertext)
 
 @api_view(['POST'])
 @request_interface(['uid'])
@@ -466,12 +482,13 @@ def POSTekyc(request):
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
-            # print(transaction.state)
+            print(transaction.state)
             assert(transaction.state == 'init')
             requesterDeviceId = transaction.requester.deviceID
             lender = transaction.lender
             assert(lender == AnonProfile.objects.get(uidToken=request.data['uidToken']))
 
+            print("h1")
             #new flow to call AAdhaar eKYC(offline) API
             headers = {
                 "content-type": "application/json"
@@ -489,10 +506,17 @@ def POSTekyc(request):
                 headers=headers,
             ).json()
 
+            print(">>>>>>>>>>>>>>>>>>")
+            #print(response)
             if(response['status'] == 'Success' or response['status'] == 'success'):
-                eekyc = response['eKycXML']
+                print(">>>>>>>>>>>>>>>>>>")
+                eekyc = response
                 lenderAddress = getAddressHashFromOfflineEKyc(eekyc, passcode);
+                print(lenderAddress)
                 encrypted_passcode = encryptByPublicKey(passcode, lender.publicKey)
+                print(encrypted_passcode)
+                print(">>>>>>>>>>>>>>>>>>")
+
 
                 #store in the db
                 try:
@@ -519,7 +543,9 @@ def POSTekyc(request):
                     'transactionID': transactionID
                     }, status=501)
 
-        except:
+        except Exception as e:
+            print("&&&&&&&&&")
+            print(e)
             txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID. Address request acceptance failed")
             return JsonResponse({
                 'message': 'Invalid transactionID. Address request acceptance failed', 
