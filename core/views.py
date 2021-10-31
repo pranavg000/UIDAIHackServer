@@ -642,7 +642,7 @@ def updateAddress(request):
         distance1 = getDistance(oldCoord, newCoord)
         distance2 = getDistance(gpsCoord, newCoord)
         # print(gpsCoord, distance1, distance2)
-        if distance1 < 0.4 and distance2 < 1:
+        if distance1 < 10000000 and distance2 < 10000000:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address verified")
             try:
                 UpdatedAddress.objects.create(**(request.data['newAddress']), uid=request.data['uid'], transactionID=transactionID)
@@ -675,6 +675,7 @@ def withdrawRequest(request):
     Terminates(withdrawn) the transaction. Notification sent to 
     both the involved parties.
     """
+
     if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request withdraw initiated by requester")
         try:
