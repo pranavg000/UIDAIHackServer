@@ -86,6 +86,8 @@ def verifyOTPAuthAPI(txnId, otp, uid):
     # print(">>>>>>>>>>>>>>>>>>>", response)
     if response['status'] and (response['status'] == 'y' or response['status'] == 'Y'):
         return True, sha256(uid.encode()).hexdigest()
+    if response['errCode']:
+        return False, response['errCode']
     return False, None
 
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
@@ -145,7 +147,7 @@ def authUID(request):
         
         if(transactionID == -1):
             authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP API request failed")
-            return JsonResponse({'transactionID': transactionID, 'message': 'API request failed, please try again'}, status=500)
+            return JsonResponse({'transactionID': transactionID, 'message': 'API request failed, please try again'}, status=501)
         
         authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP initiated")
         return JsonResponse({'transactionID': transactionID, 'message': 'OTP initiated'}, status=200)
@@ -166,9 +168,15 @@ def authOTP(request):
         result, uidToken = verifyOTPAuthAPI(transactionID, request.data['otp'], uid)
         
         if not result:
-            authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Invalid OTP")
-            return JsonResponse({'body': "Wrong OTP", 'transactionID': transactionID}, status=403)
-
+            if uidToken == '400':
+                authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Invalid OTP")
+                return JsonResponse({'body': "Wrong OTP", 'transactionID': transactionID}, status=403)
+            elif uidToken == '403':
+                authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="Maxmimum trials for OTP check reached, please request OTP again")
+                return JsonResponse({'body': "Maxmimum trials for OTP check reached, please request OTP again", 'transactionID': transactionID}, status=503)
+            else:
+                authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message=f"Error in AuthAPI Call, error code: {uidToken}")
+                return JsonResponse({'body': "Internal Server Error", 'transactionID': transactionID}, status=501)
 
         authlog(uid=request.data['uid'], transactionID=request.data['transactionID'], message="OTP verified")
         deviceID = request.data['deviceID']
@@ -211,7 +219,7 @@ def authOTP(request):
             }, status=200)
 
 
-    return JsonResponse({}, status=403)
+    return JsonResponse({}, status=400)
 
 
 @api_view(['POST'])
@@ -224,7 +232,7 @@ def sendRequest(request):
             requester = AnonProfile.objects.get(uidToken=request.data['uidToken'])
             
         except:
-            return JsonResponse({}, status=400)
+            return JsonResponse({'body':'Invalid uidToken / Receiver Share Code'}, status=403)
 
         Transaction.objects.filter(lender=lender, requester=requester).update(state='aborted')
         transaction = Transaction.objects.create(lender=lender, requester=requester)
@@ -240,7 +248,7 @@ def sendRequest(request):
             transaction.state = 'aborted'
             transaction.save()
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Unable to send request to lender. Aborting")
-            return JsonResponse({'body': 'Unable to send request to lender. Aborting', 'transactionID': transactionID}, status=400)
+            return JsonResponse({'body': 'Unable to send request to lender. Aborting', 'transactionID': transactionID}, status=502)
 
     return JsonResponse({}, status=400)
 
@@ -259,7 +267,7 @@ def rejectRequest(request):
             
         except:
             txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Invalid transactionID. Transaction not rejected")
-            return JsonResponse({'body': "Invalid transactionID"}, status=400)
+            return JsonResponse({'body': "Invalid transactionID"}, status=403)
 
         requester = transaction.requester
         transaction.state = 'rejected'
@@ -289,7 +297,7 @@ def getPublicKey(request):
             return JsonResponse({'publicKey': profile.publicKey}, status=200)
         except:
             txnlog(uidToken=request.data['uidToken'], message="Invalid share code")
-            return JsonResponse({'body': "Invalid share code"}, status=400)
+            return JsonResponse({'body': "Invalid share code"}, status=403)
 
     return JsonResponse({}, status=400)
 
@@ -307,7 +315,7 @@ def POSTekyc(request):
 
         try:
             transaction = Transaction.objects.get(transactionID=transactionID)
-            print(transaction.state)
+            # print(transaction.state)
             assert(transaction.state == 'init')
             renterDeviceId = transaction.requester.deviceID
             lender = transaction.lender
@@ -324,7 +332,7 @@ def POSTekyc(request):
 
         except:
             txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID. Address request acceptance failed")
-            return JsonResponse({'message': 'Invalid transactionID. Address request acceptance failed', 'transactionID': transactionID}, status=400)
+            return JsonResponse({'message': 'Invalid transactionID. Address request acceptance failed', 'transactionID': transactionID}, status=403)
 
         
         # print(transactionID, eKYC_enc, passcode_enc, filename)
@@ -344,7 +352,7 @@ def POSTekyc(request):
                 }, status=200)
 
         txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Acceptance notification could not be delivered to requester")
-        return JsonResponse({'message': 'Push Notification Failure', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+        return JsonResponse({'message': 'Push Notification Failure', 'transactionID': transactionID, 'status': transaction.state}, status=502)
 
     return JsonResponse({'message': 'Please "POST" the request', 'transactionID': '-1'}, status=400)
 
@@ -378,7 +386,7 @@ def GETekyc(request):
                 }, status=200)
         except:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Invalid transactionID. Unable to send eKYC to requester")
-            return JsonResponse({'message': 'Invalid transactionID. Unable to send eKYC to requester', 'transactionID': transactionID}, status=500)
+            return JsonResponse({'message': 'Invalid transactionID. Unable to send eKYC to requester', 'transactionID': transactionID}, status=403)
 
     return JsonResponse({'message': 'Please "GET" the request!', 'transactionID': '-1'}, status=400)
 
@@ -397,18 +405,18 @@ def updateAddress(request):
             assert(transaction.state == 'shared')
         except:
             txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Invalid transactionID")
-            return JsonResponse({'body': "Invalid transactionID"}, status=400)
+            return JsonResponse({'body': "Invalid transactionID"}, status=403)
 
         txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address verification initiated")
         oldCoord = getCoord(request.data['oldAddress'])
         if not oldCoord:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Lender's address is invalid")
-            return JsonResponse({'body': 'Old address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+            return JsonResponse({'body': 'Old address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=403)
         
         newCoord = getCoord(request.data['newAddress'])
         if not newCoord:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address is invalid")
-            return JsonResponse({'body': 'New address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+            return JsonResponse({'body': 'New address invalid', 'transactionID': transactionID, 'status': transaction.state}, status=403)
         
         gpsCoord = request.data['gpsCoord']
         distance1 = getDistance(oldCoord, newCoord)
@@ -429,11 +437,11 @@ def updateAddress(request):
                 return JsonResponse({'body': 'Success', 'transactionID': transactionID, 'status': transaction.state}, status=200)
             except:
                 txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Requester's new address could not be committed to DB")
-                return JsonResponse({'body': 'Repeated TransactionID', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+                return JsonResponse({'body': 'Repeated TransactionID', 'transactionID': transactionID, 'status': transaction.state}, status=409)
 
         
         txnlog(uidToken=request.data['uidToken'], transaction=transaction, message=f"Addresses are too far. Distance from gps: {distance2}, dist from lender's address: {distance1}")
-        return JsonResponse({'body': f'Addresses are too far. Dist from gps: {distance2}, dist from oldAddress: {distance1}', 'transactionID': transactionID, 'status': transaction.state}, status=400)
+        return JsonResponse({'body': f'Addresses are too far. Dist from gps: {distance2}, dist from oldAddress: {distance1}', 'transactionID': transactionID, 'status': transaction.state}, status=401)
 
     return JsonResponse({}, status=400)
 
