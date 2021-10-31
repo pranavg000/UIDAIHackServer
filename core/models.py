@@ -14,11 +14,11 @@ class AnonProfile(models.Model):
     def __str__(self):
         return 'AnonProfile:' + self.uidToken
 
-# Dummy table for testing purposes. Will delete in final build
-class OTPAPISim(models.Model):
-    transactionID = models.CharField(max_length=12, unique=True)
-    uid = models.CharField(max_length=12, primary_key=True)
-    uidToken = models.CharField(max_length=32, unique=True)
+# # Dummy table for testing purposes. Will delete in final build
+# class OTPAPISim(models.Model):
+#     transactionID = models.CharField(max_length=12, unique=True)
+#     uid = models.CharField(max_length=12, primary_key=True)
+#     uidToken = models.CharField(max_length=32, unique=True)
 
 
 class Ekyc(models.Model):
@@ -58,11 +58,11 @@ class Transaction(models.Model):
 
 
 
-class Notifications(models.Model):
-    receiver = models.ForeignKey(AnonProfile, related_name='notifReceiver', on_delete=models.CASCADE)
-    messageTitle = models.CharField(max_length=64)
-    messageBody = models.CharField(max_length=512)
-    timestamp = models.DateTimeField(auto_now_add=True)
+# class Notifications(models.Model):
+#     receiver = models.ForeignKey(AnonProfile, related_name='notifReceiver', on_delete=models.CASCADE)
+#     messageTitle = models.CharField(max_length=64)
+#     messageBody = models.CharField(max_length=512)
+#     timestamp = models.DateTimeField(auto_now_add=True)
 
 
 
