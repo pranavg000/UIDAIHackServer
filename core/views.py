@@ -446,4 +446,36 @@ def updateAddress(request):
     return JsonResponse({}, status=400)
 
 
+@api_view(['POST'])
+@check_token
+@request_interface(['transactionID'])
+def withdrawRequest(request):
+    if request.method == 'POST':
+        txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request withdraw initiated by requester")
+        try:
+            transaction = Transaction.objects.get(transactionID=request.data['transactionID'])
+            assert(transaction.state == 'shared')
+            requester = transaction.requester
+            assert(requester == AnonProfile.objects.get(uidToken=request.data['uidToken']))
+            
+        except:
+            txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Invalid transactionID. Transaction not withdrawn")
+            return JsonResponse({'body': "Invalid transactionID"}, status=403)
+
+        lender = transaction.lender
+        transaction.state = 'withdrawn'
+        transaction.save()
+        txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Address request withdrawn by requester")
+
+        if sendPushNotification(lender.deviceID, "Address request withdrawn", f"Address request withdrawn for TNo: {transaction.transactionID}", {'transactionID': transaction.transactionID, 'status': transaction.state}):
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Withdraw notification delivered to lender")
+        else:
+            txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Withdraw notification could not be delivered to lender")
+
+        return JsonResponse({'body': 'Request withdrawn successfully', 'transactionID': transaction.transactionID }, status=200)
+        
+
+    return JsonResponse({}, status=400)
+
+
 

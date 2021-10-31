@@ -5,4 +5,5 @@ TRANSACTION_STATES = [
     ('shared', 'ekyc shared with requester'),
     ('commited', 'Address updated successfully'),    # Final state
     ('aborted', 'Aborted due to any reason'),       # Final state
+    ('withdrawn', 'Requester Withdrew the request'),       # Final state
 ]
