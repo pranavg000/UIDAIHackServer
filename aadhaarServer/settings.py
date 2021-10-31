@@ -178,6 +178,12 @@ LOGGING = {
             'filename': './logs/txn.log',
             'formatter': 'norm'
         },
+        'dblog': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': './logs/db.log',
+            'formatter': 'norm'
+        },
 
     },
     'loggers': {
@@ -196,6 +202,10 @@ LOGGING = {
         },
         'txnlog': {
             'handlers': ['txnlog'],
+            'level': 'DEBUG',
+        },
+        'django.db.backends': {
+            'handlers': ['dblog'],
             'level': 'DEBUG',
         }
     }
