@@ -604,6 +604,7 @@ def updateAddress(request):
     server for verification. After verification, the updated address records are 
     stored.
     """
+
     if request.method == 'POST':
         transactionID = request.data['transactionID']
         txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Final address update initiated by requester")
@@ -622,7 +623,7 @@ def updateAddress(request):
 
         try:
             offlineEKYC = OfflineEKYC.objects.get(transactionID=transactionID)
-            encrEkycOld = offlineEKYC.encryptedEKYC
+            encrEkycOld = offlineEKYC.hashv
             checkSum = (sha256(str(request.data['oldAddress']).encode()).hexdigest() == encrEkycOld)
         except:
             txnlog(uidToken=request.data['uidToken'], transaction=transaction, message="Database read failure")
