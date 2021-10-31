@@ -20,12 +20,40 @@ txnlogger = logging.getLogger('txnlog')
 authlogger = logging.getLogger('authlog')
 
 def redactUID(uid):
+    """Redacts UID of resident before storing in logs
+
+    Args:
+        uid (str): UID of resident
+
+    Returns:
+        redactedUID (str)
+    """
+
     return 'X'*8+uid[-4:]
 
 def authlog(message, uid, transactionID=""):
+    """Logs auth API calls
+
+    Args:
+        message (str): Message to log
+        uid (str): UID of resident
+        transactionID (str): TransactionID of the auth transaction
+            (default is "")
+    """
+
     authlogger.info(f"{transactionID}:{redactUID(uid)}:{message}")
 
 def txnlog(uidToken, message, transactionID="", transaction=None):
+    """Logs all address request/update transactions
+
+    Args:
+        uidToken (str): UID token of resident
+        message (str): Message to log
+        transactionID (str): TransactionID of the address transaction
+            (default is "")
+        transaction (Transaction): Current ongoing transaction 
+    """
+
     if transaction:
         txnlogger.info(f"{uidToken}:{transaction.transactionID}:{transaction.lender.uidToken}:{transaction.requester.uidToken}:{transaction.state}:{message}")
     else:
@@ -41,16 +69,41 @@ SHAREABLE_CODE_LEN = 9
 ADDRESS_FIELDS = ['co','house','street','lm','lo','vtc','subdist','dist','state','country','pc','po']
 
 def genAuthToken():
+    """Generates random alphanumeric Auth Token
+
+    Args:
+        void
+
+    Returns:
+        authToken (str): randomly generated alphanumeric auth token
+    """
+
     return getRandAlNum(AUTH_TOKEN_LEN)
 
 def genShareableCode():
+    """Generates random alphabetic unique shareable code
+
+    Args:
+        void
+
+    Returns:
+        shareableCode (str): random alphabetic unique shareable code
+    """
+    
     shareableCode = ""
     while (shareableCode == "" or AnonProfile.objects.filter(shareableCode=shareableCode).exists()):
         shareableCode = getRandAl(SHAREABLE_CODE_LEN)
     return shareableCode
 
 def callOTPAPI(uid):
-    #TODO: OTP API (AN) 
+    """Calls UIDAI OTP API to send OTP to resident
+
+    Args:
+        uid (str): UID of resident
+
+    Returns:
+        txnID (str): txnID if OTP sent successfully, -1 otherwise
+    """
 
     txnId = uuid.uuid4()
     
@@ -65,13 +118,22 @@ def callOTPAPI(uid):
 
     response = requests.post(getOtpApiUrl, json=data, headers=headers).json()
     respStatus = response['status']
-    respCode = response['errCode']
 
     if(respStatus and (respStatus == 'y' or respStatus == 'Y')):
         return txnId
-    return -1
+    return "-1"
 
 def verifyOTPAuthAPI(txnId, otp, uid):
+    """Calls UIDAI Auth API for OTP verification
+
+    Args:
+        txnId (str): Transaction ID
+        otp (str): OTP entered by resident
+        uid (str): UID of resident
+
+    Returns:
+        status (tuple[bool, code]): status of verification and additional info code
+    """
 
     headers = {
         "content-type": "application/json"
@@ -91,23 +153,42 @@ def verifyOTPAuthAPI(txnId, otp, uid):
     return False, None
 
 def sendPushNotification(deviceID, messageTitle, messageBody, dataMessage=None):
-    # return True
+    """Send push notification to a device using FCM
+
+    Args:
+        deviceID (str): device registration token for FCM
+        messageTitle (str): Title of noitification
+        messageBody (str): Body of noitification
+        dataMessage (dict[str, str]): Addition data to be sent to the device
+
+    Returns:
+        status (bool): True if successful, False otherwise
+    """
+
     result = push_notification_service.notify_single_device(registration_id=deviceID, message_title=messageTitle, message_body=messageBody)
     result = push_notification_service.notify_single_device(registration_id=deviceID, data_message=dataMessage)
-    txnlog("FFF", message=json.dumps(dataMessage))
+
     if result['success'] == 1:
         return True
+    return False
 
-    return False        # Pray that this never happens
+def getDistance(point1, point2):
+        """Geographical distance between 2 points on the earth
 
-def getDistance(p1, p2):
-        # approximate radius of earth in km
-        R = 6373.0
+        Args:
+            point1 (list[float]): First point in [lat, long] format
+            point2 (list[float]): Second point in [lat, long] format
 
-        lat1 = radians(p1[0])
-        lon1 = radians(p1[1])
-        lat2 = radians(p2[0])
-        lon2 = radians(p2[1])
+        Returns:
+            dist (float): Geographical distance (in km) between point1 & point2
+        """
+
+        R = 6373.0      # Approx radius of earth (in km)
+
+        lat1 = radians(point1[0])
+        lon1 = radians(point1[1])
+        lat2 = radians(point2[0])
+        lon2 = radians(point2[1])
 
         dlon = lon2 - lon1
         dlat = lat2 - lat1
@@ -117,7 +198,17 @@ def getDistance(p1, p2):
 
         return R * c    # in km
 
+# Returns (lat, long) of an address
 def getCoord(address):
+    """Calls the geocode API to get (lat, long) of an address
+
+    Args:
+        address (dict[str, str]): Addrress in UIDAI address format
+
+    Returns:
+        [lat, long] (list[float, float]): a list representing latitude and longitude
+    """
+
     addressS = ""
     IGNORE_FIELDS = ['co', 'po', 'lm']
     for field in ADDRESS_FIELDS:
@@ -140,12 +231,18 @@ def getCoord(address):
 @api_view(['POST'])
 @request_interface(['uid'])
 def authUID(request):
+    """API endpoint for initiating authentication process with otp
+
+    Client app sends the uid of the resident and UIDAI OTP API is called 
+    to send OTP to the registed mobile number.
+    """
+
     if request.method == 'POST':
         # data = JSONParser.parse(request)
         
         transactionID = callOTPAPI(request.data['uid'])
         
-        if(transactionID == -1):
+        if(transactionID == "-1"):
             authlog(uid=request.data['uid'], transactionID=transactionID, message="OTP API request failed")
             return JsonResponse({'transactionID': transactionID, 'message': 'API request failed, please try again'}, status=501)
         
@@ -158,6 +255,13 @@ def authUID(request):
 @api_view(['POST'])
 @request_interface(['transactionID', 'otp', 'deviceID', 'publicKey', 'uid'])
 def authOTP(request):
+    """API endpoint for OTP verification
+
+    Client app sends transactionID, otp and other metadata of the client 
+    app. UIDAI Auth API is called to verify OTP. The authToken and 
+    shareable code is returned to the client app.
+    """
+
     if request.method == 'POST':
         # data = JSONParser.parse(request)
 
@@ -226,6 +330,13 @@ def authOTP(request):
 @check_token
 @request_interface(['receiverSC', 'message'])
 def sendRequest(request):
+    """API endpoint for initiating a Address Request
+
+    Client app sends the shareable code of the lender and an encrypted 
+    message containing his information (such as name, phone number, etc). 
+    A new transaction is initiated. Push notification is sent to the lender.
+    TransactionID is shared with both the involved parties.
+    """
     if request.method == 'POST':
         try:
             lender = AnonProfile.objects.get(shareableCode=request.data['receiverSC'])
@@ -257,6 +368,11 @@ def sendRequest(request):
 @check_token
 @request_interface(['transactionID'])
 def rejectRequest(request):
+    """API endpoint used by lender to reject the address request
+
+    Terminates(rejects) the transaction. Notification sent to 
+    both the involved parties.
+    """
     if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request rejection initiated by lender")
         try:
@@ -394,6 +510,12 @@ def GETekyc(request):
 @check_token
 @request_interface(['transactionID', 'oldAddress', 'newAddress', 'gpsCoord', 'uid'])
 def updateAddress(request):
+    """API endpoint for the new address verification and storage
+
+    Requester sends the landlord's address, new address and gps coordinates to the 
+    server for verification. After verification, the updated address records are 
+    stored.
+    """
     if request.method == 'POST':
         transactionID = request.data['transactionID']
         txnlog(uidToken=request.data['uidToken'], transactionID=transactionID, message="Final address update initiated by requester")
@@ -450,11 +572,16 @@ def updateAddress(request):
 @check_token
 @request_interface(['transactionID'])
 def withdrawRequest(request):
+    """API endpoint used by requester to withdraw his address request
+
+    Terminates(withdrawn) the transaction. Notification sent to 
+    both the involved parties.
+    """
     if request.method == 'POST':
         txnlog(uidToken=request.data['uidToken'], transactionID=request.data['transactionID'], message="Address request withdraw initiated by requester")
         try:
             transaction = Transaction.objects.get(transactionID=request.data['transactionID'])
-            assert(transaction.state == 'shared')
+            assert(transaction.state != 'rejected' or transaction.state != 'aborted' or transaction.state != 'commited')
             requester = transaction.requester
             assert(requester == AnonProfile.objects.get(uidToken=request.data['uidToken']))
             
